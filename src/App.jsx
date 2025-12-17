@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import { drugsData, repurposingResults } from './data';
 import { analyzeRepurposingRealTime, generateRepurposingSuggestions } from './services/drugApi';
-import { searchDrugs, getDrugByName, DRUG_COUNT, getDrugStats } from './services/drugListService';
+import { searchDrugs, getDrugByName, DRUG_COUNT, getDrugStats, getAllDrugs } from './services/drugListService';
+import { searchDrugsCombined, getDrugDetailsByRxcui, autocompleteDrugNames } from './services/rxNormApi';
 import ResultsPanel from './components/ResultsPanel';
 import EvidencePanel from './components/EvidencePanel';
 import FilterPanel from './components/FilterPanel';
@@ -18,7 +19,9 @@ function App() {
   const [selectedDrug, setSelectedDrug] = useState('Metformin');
   const [drugSearchQuery, setDrugSearchQuery] = useState('Metformin');
   const [searchResults, setSearchResults] = useState([]);
+  const [rxnormResults, setRxnormResults] = useState([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [searchingAllDrugs, setSearchingAllDrugs] = useState(false);
   const searchInputRef = useRef(null);
   const [drugInfo, setDrugInfo] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -33,16 +36,43 @@ function App() {
     sortBy: 'confidence'
   });
 
-  // Handle drug search
+  // Handle drug search - searches BOTH local + ALL drugs via RxNorm API
   useEffect(() => {
-    if (drugSearchQuery.length >= 2) {
-      const results = searchDrugs(drugSearchQuery, 10);
-      setSearchResults(results);
-      setShowSearchDropdown(results.length > 0);
-    } else {
-      setSearchResults([]);
-      setShowSearchDropdown(false);
-    }
+    let isCancelled = false;
+    
+    const performSearch = async () => {
+      if (drugSearchQuery.length >= 2) {
+        // First: Show local results immediately (fast)
+        const localResults = searchDrugs(drugSearchQuery, 10);
+        setSearchResults(localResults);
+        setShowSearchDropdown(true);
+        
+        // Second: Fetch ALL drugs from RxNorm API (comprehensive but slower)
+        setSearchingAllDrugs(true);
+        try {
+          const allDrugs = await autocompleteDrugNames(drugSearchQuery);
+          if (!isCancelled) {
+            setRxnormResults(allDrugs);
+            setSearchingAllDrugs(false);
+          }
+        } catch (error) {
+          console.error('RxNorm search error:', error);
+          if (!isCancelled) {
+            setSearchingAllDrugs(false);
+          }
+        }
+      } else {
+        setSearchResults([]);
+        setRxnormResults([]);
+        setShowSearchDropdown(false);
+      }
+    };
+    
+    performSearch();
+    
+    return () => {
+      isCancelled = true;
+    };
   }, [drugSearchQuery]);
 
   // Load drug info when selection changes
@@ -259,14 +289,14 @@ function App() {
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-600 bg-white px-4 py-2 rounded-lg border border-gray-200">
               <Database className="w-4 h-4" />
-              <span className="font-semibold">{DRUG_COUNT} drugs available</span>
+              <span className="font-semibold">{DRUG_COUNT} local + 🌍 ALL drugs (RxNorm)</span>
             </div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div className="relative">
               <label className="block text-sm font-semibold text-gray-700 mb-3">
-                Drug Selection <span className="text-gray-400 font-normal">(Search from {DRUG_COUNT} drugs)</span>
+                Drug Selection <span className="text-gray-400 font-normal">(Search ALL drugs - {DRUG_COUNT} local + thousands via RxNorm)</span>
               </label>
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -280,29 +310,76 @@ function App() {
                   placeholder="Search drugs (e.g., Metformin, Lipitor)..."
                   className="w-full pl-12 pr-4 py-4 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all bg-white text-lg font-medium"
                 />
-                {showSearchDropdown && searchResults.length > 0 && (
+                {showSearchDropdown && (searchResults.length > 0 || rxnormResults.length > 0) && (
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute top-full mt-2 w-full bg-white border-2 border-gray-200 rounded-xl shadow-2xl max-h-96 overflow-y-auto z-50"
                   >
-                    {searchResults.map((drug, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleDrugSelect(drug)}
-                        className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left border-b border-gray-100 last:border-0"
-                      >
-                        <div className="font-semibold text-gray-800">{drug.name}</div>
-                        <div className="text-sm text-gray-500">
-                          {drug.tradeName && `${drug.tradeName} • `}{drug.approvedFor}
+                    {/* Local Database Results (79 drugs with full data) */}
+                    {searchResults.length > 0 && (
+                      <div>
+                        <div className="px-4 py-2 bg-blue-50 text-xs font-semibold text-blue-700 border-b border-blue-100 sticky top-0">
+                          📦 LOCAL DATABASE ({searchResults.length} matches)
                         </div>
-                        {drug.category && (
-                          <span className="inline-block text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded mt-1">
-                            {drug.category}
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                        {searchResults.map((drug, index) => (
+                          <button
+                            key={`local-${index}`}
+                            onClick={() => handleDrugSelect(drug)}
+                            className="w-full px-4 py-3 hover:bg-blue-50 transition-colors text-left border-b border-gray-100"
+                          >
+                            <div className="font-semibold text-gray-800">{drug.name}</div>
+                            <div className="text-sm text-gray-500">
+                              {drug.tradeName && `${drug.tradeName} • `}{drug.approvedFor}
+                            </div>
+                            {drug.category && (
+                              <span className="inline-block text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded mt-1">
+                                {drug.category}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* RxNorm API Results (ALL drugs - thousands) */}
+                    {rxnormResults.length > 0 && (
+                      <div>
+                        <div className="px-4 py-2 bg-green-50 text-xs font-semibold text-green-700 border-b border-green-100 sticky top-0">
+                          🌍 ALL DRUGS DATABASE ({rxnormResults.length} matches) {searchingAllDrugs && '⏳ Loading...'}
+                        </div>
+                        {rxnormResults.slice(0, 30).map((drugName, index) => (
+                          <button
+                            key={`rxnorm-${index}`}
+                            onClick={() => {
+                              setDrugSearchQuery(drugName);
+                              setSelectedDrug(drugName);
+                              setShowSearchDropdown(false);
+                              toast.success(`Selected: ${drugName}`, { icon: '💊' });
+                            }}
+                            className="w-full px-4 py-3 hover:bg-green-50 transition-colors text-left border-b border-gray-100"
+                          >
+                            <div className="font-semibold text-gray-800">{drugName}</div>
+                            <div className="text-xs text-gray-500">From RxNorm (FDA Database)</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Loading indicator */}
+                    {searchingAllDrugs && rxnormResults.length === 0 && (
+                      <div className="px-4 py-6 text-center text-gray-500">
+                        <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                        Searching all drugs...
+                      </div>
+                    )}
+                    
+                    {/* No results */}
+                    {!searchingAllDrugs && searchResults.length === 0 && rxnormResults.length === 0 && (
+                      <div className="px-4 py-6 text-center text-gray-500">
+                        No drugs found matching "{drugSearchQuery}"
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </div>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Integration Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 1200px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .test-container {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: transform 0.2s;
+    }
+    button:hover {
+      transform: scale(1.05);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 16px;
+      background: #0f172a;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      font-family: 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .success { color: #10b981; }
+    .error { color: #ef4444; }
+    .info { color: #3b82f6; }
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .status.loading {
+      background: #3b82f6;
+      color: white;
+    }
+    .status.success {
+      background: #10b981;
+      color: white;
+    }
+    .status.error {
+      background: #ef4444;
+      color: white;
+    }
+    h1 { margin-top: 0; }
+    h3 { margin-top: 0; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <h1>🔬 Real-Time Drug Repurposing API Test</h1>
+  <p style="color: #94a3b8;">Testing integration with PubChem, PubMed, ClinicalTrials.gov, and OpenFDA</p>
+
+  <div class="test-container">
+    <h3>Select Drug to Test:</h3>
+    <select id="drugSelect" style="padding: 8px; border-radius: 6px; background: #0f172a; color: white; border: 1px solid #334155; font-size: 14px;">
+      <option>Metformin</option>
+      <option>Aspirin</option>
+      <option>Ibuprofen</option>
+      <option>Sildenafil</option>
+      <option>Thalidomide</option>
+    </select>
+    <button id="testBtn" onclick="testAPI()">Run API Test</button>
+    <span id="status"></span>
+  </div>
+
+  <div id="results"></div>
+
+  <script type="module">
+    import { analyzeRepurposingRealTime } from './src/services/drugApi.js';
+    
+    window.testAPI = async function() {
+      const drug = document.getElementById('drugSelect').value;
+      const btn = document.getElementById('testBtn');
+      const statusEl = document.getElementById('status');
+      const resultsEl = document.getElementById('results');
+      
+      btn.disabled = true;
+      statusEl.innerHTML = '<span class="status loading">Testing...</span>';
+      resultsEl.innerHTML = '';
+      
+      const startTime = Date.now();
+      
+      try {
+        console.log('🧪 Testing API integration for:', drug);
+        const results = await analyzeRepurposingRealTime(drug);
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        statusEl.innerHTML = `<span class="status success">Success in ${duration}s</span>`;
+        
+        let html = '<div class="test-container">';
+        html += '<h3 class="success">✅ API Integration Successful</h3>';
+        html += '<div class="result">';
+        
+        // PubChem results
+        if (results.pubchem) {
+          html += '<div class="success">📊 PubChem Data:</div>';
+          html += `• Compound ID: ${results.pubchem.cid || 'N/A'}\n`;
+          html += `• Formula: ${results.pubchem.molecularFormula || 'N/A'}\n`;
+          html += `• Weight: ${results.pubchem.molecularWeight || 'N/A'}\n\n`;
+        }
+        
+        // PubMed results
+        if (results.pubmed) {
+          html += '<div class="info">📚 PubMed Publications:</div>';
+          html += `• Total publications: ${results.pubmed.publicationCount}\n`;
+          html += `• Recent article IDs: ${results.pubmed.recentIds.slice(0, 5).join(', ')}\n\n`;
+        }
+        
+        // Clinical Trials results
+        if (results.clinicalTrials) {
+          html += '<div class="info">🏥 ClinicalTrials.gov:</div>';
+          html += `• Total trials: ${results.clinicalTrials.totalTrials}\n`;
+          html += `• Active trials: ${results.clinicalTrials.activeTrials}\n`;
+          html += `• Phases: ${[...new Set(results.clinicalTrials.phases)].join(', ') || 'N/A'}\n\n`;
+        }
+        
+        // OpenFDA results
+        if (results.adverseEvents) {
+          html += '<div class="error">⚠️ OpenFDA Adverse Events:</div>';
+          html += `• Total reports: ${results.adverseEvents.totalReports}\n`;
+          html += `• Serious events: ${results.adverseEvents.seriousEvents}\n`;
+          html += `• Common reactions: ${results.adverseEvents.commonReactions.slice(0, 5).join(', ') || 'N/A'}\n\n`;
+        }
+        
+        html += '<div style="color: #94a3b8; margin-top: 16px;">Full Response:</div>';
+        html += JSON.stringify(results, null, 2);
+        html += '</div></div>';
+        
+        resultsEl.innerHTML = html;
+        
+      } catch (error) {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        statusEl.innerHTML = `<span class="status error">Failed in ${duration}s</span>`;
+        
+        resultsEl.innerHTML = `
+          <div class="test-container">
+            <h3 class="error">❌ API Test Failed</h3>
+            <div class="result error">
+              ${error.message}
+              
+              <div style="margin-top: 16px;">
+              Common issues:
+              • CORS errors: APIs may need to be called from backend
+              • Rate limiting: Try again in a few minutes
+              • Network issues: Check internet connection
+              </div>
+            </div>
+          </div>
+        `;
+        console.error('API Test Error:', error);
+      }
+      
+      btn.disabled = false;
+    };
+  </script>
+</body>
+</html>
